@@ -1,0 +1,2 @@
+export get_image_ocid_compartment_ocid=ocid1.compartment.oc1..aaaaaaaakhkm2aq7ycoipubh4rhkdhv7ktgoulwuwwltcivv2vtu5qvum72q
+export get_image_ocid_region=us-ashburn-1

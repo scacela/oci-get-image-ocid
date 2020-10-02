@@ -1,0 +1,357 @@
+#!/usr/bin/env bash
+
+init_vars()
+{
+source env.sh
+
+str_message="" # string for messages
+str_message_build="" # string for messages that gets built upon
+is_using_param_list=false
+is_using_param_name=false
+is_using_param_marketplace=false
+tab="   "
+is_at_least_one_image_id=false
+
+# colors for messages
+color_none="\033[0m"
+color_black="\033[0;30m"
+color_red="\033[0;31m"
+color_green="\033[0;32m"
+color_yellow="\033[0;33m"
+color_blue="\033[0;34m"
+color_magenta="\033[0;35m"
+color_cyan="\033[0;36m"
+color_light_gray="\033[0;37m"
+
+array_compartment_ocids=()
+array_names=()
+array_regions=()
+}
+
+check_dependencies()
+{
+# check whether dependencies are installed, error message and exit if not installed
+
+jq --help &> /dev/null
+if [ $? -ne 0 ]; then
+	str_message=$(cat <<- EOF
+	${color_red}Error:${color_none} Dependency missing: please install jq. You can verify your install with ${color_helpful}jq --help${color_none}.\n
+	Please refer to ${color_helpful}https://stedolan.github.io/jq/download/${color_none} for download instructions.\n
+	EOF
+	)
+	echo -e "${str_message}"
+	exit
+fi
+
+oci &> /dev/null
+if [ $? -ne 0 ]; then
+	str_message=$(cat <<- EOF
+	\n${color_red}Error:${color_none} Dependency missing: please install oci-cli. You can verify your install with ${color_helpful}oci${color_none}.\n
+	Please refer to ${color_helpful}https://docs.cloud.oracle.com/en-us/iaas/Content/API/SDKDocs/cliinstall.htm${color_none} for download instructions.\n
+	EOF
+	)
+	echo -e "${str_message}"
+	exit
+fi
+}
+
+show_options()
+{
+# print options, for help or as a result of a user error
+
+local options_str=""
+local arg_zero_tab=""
+local tab_long="\t\t"
+
+for i in $(seq 1 $(expr "${#0}" + 1)); do arg_zero_tab+=" "; done
+
+options_str=$(cat <<- EOF
+
+Options:
+
+Flag                          Description                                       Usage
+
+-n          Specify the name of the image whose OCID you want to get.           $0 -n "Oracle Linux 7 - HPC Cluster Networking Image"
+-h          Show options.                                                       $0 -h
+-l          Show names of listings for images.                                  $0 -l
+-m          Set visibility to marketplace catalog listings.                     $0 -m
+                 If unspecified, visibility is set to standard image listings.
+EOF
+)
+echo -e "${options_str}\n" # in quotes to prevent field splitting in echo from eating spaces
+exit
+}
+
+get_marketplace_image_ocid()
+{
+local array_app_catalog_listing_ids=()
+local array_version_ids=()
+local array_image_ids=()
+
+export name_image_catalog_listing=$1
+
+local region=$2 # currently irrelevant for marketplace images but here anyway
+local compartment_ocid=$3 # currently irrelevant for marketplace images but here anyway
+
+array_app_catalog_listing_ids=($(oci compute --region ${region} pic listing list --all 2> /dev/null | jq '.data[] | select(."display-name"==env.name_image_catalog_listing) | ."listing-id"' | sed "s|\"||g"))
+for app_catalog_listing_id in "${array_app_catalog_listing_ids[@]}"; do
+	str_message_build+=$(cat <<- EOF
+	\n${tab}${tab}${tab}${tab}${color_blue}App Catalog Listing OCID:${color_none} ${app_catalog_listing_id}
+	EOF
+	)
+	array_version_ids=($(oci compute --region ${region} pic version list --listing-id ${app_catalog_listing_id} 2> /dev/null | jq '.data[]."listing-resource-version"' | sed "s|\"||g"))
+	for version_id in "${array_version_ids[@]}"; do
+		str_message_build+=$(cat <<- EOF
+		\n${tab}${tab}${tab}${tab}${tab}${color_cyan}Version ID:${color_none} ${version_id}
+		EOF
+		)
+		array_image_ocids=($(oci compute --region ${region} pic version get --listing-id ${app_catalog_listing_id} --resource-version ${version_id} 2> /dev/null | jq '.data."listing-resource-id"' | sed "s|\"||g"))
+		for image_ocid in "${array_image_ocids[@]}"; do
+			str_message_build+=$(cat <<- EOF
+			\n${tab}${tab}${tab}${tab}${tab}${tab}${color_green}${image_ocid}${color_none}
+			EOF
+			)
+			is_at_least_one_image_id=true
+		done
+	done
+done
+}
+
+handle_custom_params()
+{
+if test $# -eq 0; then
+	str_message=$(cat <<- EOF
+	\n${color_red}Error:${color_none} No parameters passed.
+	EOF
+	)
+	echo -e "${str_message}"
+	show_options
+fi
+while test $# -gt 0; do
+	case $1 in
+		-cp)
+			if test $# -eq 1; then
+				str_message=$(cat <<- EOF
+				\n${color_red}Error:${color_none}  No value was passed to ${color_yellow}$1${color_none} flag.
+				EOF
+				)
+				echo -e "${str_message}"
+				show_options
+			fi
+			while test $# -gt 1; do
+				oci iam compartment get --compartment-id $2 &> /dev/null # silence output (redirect stdout and stderr to null
+				# if command successful i.e. if compartment exists and is accessible
+				if [ $? -eq 0 ]; then
+					# success
+					array_compartment_ocids+=($2)
+				else
+					case $2 in
+						-*)
+							break # break escapes from the while loop you are in
+							;;
+						*)
+							str_message=$(cat <<- EOF
+							\n${color_red}Error:${color_none}  $2: Not authorized to access compartment, or compartment not found.\n
+							EOF
+							)
+							echo -e "${str_message}"
+							exit
+					esac
+				fi
+			done
+			shift
+			;;
+		-h)
+			show_options
+			;;
+		-l)
+			is_using_param_list=true
+			shift
+			;;
+		-m)
+			is_using_param_marketplace=true
+			shift
+			;;
+		-n)
+			if test $# -eq 1; then
+				str_message=$(cat <<- EOF
+				\n${color_red}Error:${color_none}  No value was passed to ${color_yellow}$1${color_none} flag.\n
+				EOF
+				)
+				echo -e "${str_message}"
+				show_options
+			fi
+			while test $# -gt 1; do
+				if [[ "$2" =~ ^- ]]; then # check if param is a flag
+					break
+				else
+					# success
+					is_using_param_name=true
+					array_names+=("$2")
+				fi
+				shift
+			done
+			shift
+			;;
+		-r)
+			if test $# -eq 1; then
+				str_message=$(cat <<- EOF
+				\n${color_red}Error:${color_none}  No value was passed to ${color_yellow}$1${color_none} flag.\n
+				EOF
+				)
+				echo -e "${str_message}"
+				show_options
+			fi
+			while test $# -gt 1; do
+				array_oci_regions+=($(oci iam region list | jq .data[].name | sed "s|\"||g"))
+				# check that region is in list of oci regions
+				if [[ " ${array_oci_regions[@]} " =~ " $2 " ]]; then
+					# success
+					array_regions+=($2)
+				elif [[ "$2" =~ ^- ]]; then # check if param is a flag
+					break
+				else
+					str_message=$(cat <<- EOF
+					\n${color_red}Error:${color_none}  ${color_yellow}$2${color_none}: Not a valid region. Valid regions are:\n
+					$(for oci_region in "${array_oci_regions[@]}"; do echo "${oci_region}"; done)
+					EOF
+					)
+					echo -e "${str_message}"
+					exit
+				fi
+				shift
+			done
+			shift
+			;;
+		*)
+			str_message=$(cat <<- EOF
+			\n${color_red}Error:${color_none} ${color_yellow}$1${color_none} is not a valid option.\n
+			EOF
+			)
+			echo -e "${str_message}"
+			show_options
+			;;
+	esac
+done
+}
+
+handle_valid_custom_params()
+{
+local str_images=""
+local image_id=""
+local summary_str_standard_or_marketplace="Standard "
+local summary_str_change_to_marketplace="Marketplace "
+local str_marketplace_compartments="${tab}(Marketplace images are not currently restricted by Compartment)"
+local str_marketplace_regions="${tab}(Marketplace images are not currently restricted by Region)"
+
+if [ "${is_using_param_marketplace}" = true ]; then
+	summary_str_standard_or_marketplace=${summary_str_change_to_marketplace}
+else
+	str_marketplace_compartments=""
+	str_marketplace_regions=""
+fi
+
+# if array empty, i.e. if option not used
+if [ ${#compartment_ocids[@]} -eq 0 ]; then
+	array_compartment_ocids+=(${get_image_ocid_compartment_ocid})
+fi
+
+# if array empty, i.e. if option not used
+if [ ${#array_regions[@]} -eq 0 ]; then
+	array_regions+=(${get_image_ocid_region})
+fi
+
+
+str_message_build+=$(cat <<- EOF
+${color_green}Image OCIDs${color_none} for:
+EOF
+)
+for compartment_ocid in "${array_compartment_ocids[@]}"; do
+	str_message_build+=$(cat <<- EOF
+	\n${tab}${color_blue}Compartment OCID:${color_none} ${compartment_ocid}${color_blue}${str_marketplace_compartments}${color_none}
+	EOF
+	)
+	for region in "${array_regions[@]}"; do
+		str_message_build+=$(cat <<- EOF
+		\n${tab}${tab}${color_cyan}Region:${color_none} ${region}${color_cyan}${str_marketplace_regions}${color_none}
+		EOF
+		)
+		# if asking for marketplace image info
+		if [ "${is_using_param_marketplace}" = true ]; then
+			# if asking for a list of available images
+			if [ "${is_using_param_list}" = true ]; then
+				str_message=$(cat <<- EOF
+				\nAvailable ${summary_str_marketplace} Images.\n
+				EOF
+				)
+				str_images=$(oci compute pic listing list --all | jq '.data[]."display-name"' | sed "s|\"||g")
+				echo -e "\n${str_images}"
+				echo -e "${str_message}"
+				exit
+			fi
+			
+			# if asking for ocid of name(s)
+			for name in "${array_names[@]}"; do
+				str_message_build+=$(cat <<- EOF
+				\n${tab}${tab}${tab}${color_magenta}${summary_str_marketplace}Image Listing Name:${color_none} ${name}
+				EOF
+				)
+				get_marketplace_image_ocid "${name}" "${region}" "${compartment_ocid}"
+			done
+		else # if asking for standard image info
+			# if asking for a list of available images
+			if [ "${is_using_param_list}" = true ]; then
+				str_images=$(oci compute --region ${region} image list --compartment-id ${compartment_ocid} | jq '.data[]."display-name"' | sed "s|\"||g")
+				str_message=$(cat <<- EOF
+				\n${tab}${tab}${tab}Available ${summary_str_standard} Images in region ${color_green}${region}${color_none}, in compartment ${color_green}${compartment_ocid}${color_none}.
+				$(for image_name in ${str_images}; do echo -e "${tab}${tab}${tab}${tab}${image_name}"; done)
+				EOF
+				)
+				echo -e "${str_message}"
+				exit
+			fi
+			
+			# if asking for ocid of name(s)
+			for name in "${array_names[@]}"; do
+				export name_image_standard=${name}
+				str_message_build+=$(cat <<- EOF
+				\n${tab}${tab}${tab}${color_magenta}${summary_str_standard}Image Listing Name:${color_none} ${name}
+				EOF
+				)
+				image_ocid=$(oci compute --region ${region} image list --compartment-id ${compartment_ocid} | jq '.data[] | select(."display-name"==env.name_image_standard) | .id' | sed "s|\"||g")
+				str_message_build+=$(cat <<- EOF
+				\n${tab}${tab}${tab}${tab}${color_green}${image_ocid}${color_none}
+				EOF
+				)
+				if [ "${image_ocid}" = "" ]; then
+					is_at_least_one_image_id=false
+				else
+					is_at_least_one_image_id=true
+				fi
+			done
+		fi
+	done
+done
+
+if [ "${is_using_param_name}" = true ] && \
+	[ "${is_at_least_one_image_id}" = false ]; then
+	str_message_build=$(cat <<- EOF
+	\n${color_red}Error:${color_none}  The following images were not found as a ${summary_str_standard_or_marketplace}image:\n
+	$(for listing_name in ${array_names[@]}; do echo -e "${color_yellow}${listing_name}${color_none}"; done)\n
+	Try using the ${color_yellow}-h${color_none} option for help.\n
+	EOF
+	)
+fi
+echo -e "${str_message_build}"
+}
+
+
+main()
+{
+init_vars
+check_dependencies
+handle_custom_params "$@"
+handle_valid_custom_params
+}
+
+main "$@"
