@@ -1,4 +1,4 @@
-# oracle-cloud
+# oci-get-image-ocid
 
 Populate env.sh with a value for compartment ocid and a value for region to use as default
 values for when those values are not included as command line arguments.
