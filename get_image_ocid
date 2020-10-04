@@ -239,13 +239,14 @@ handle_valid_custom_params()
 {
 local str_images=""
 local image_id=""
-local summary_str_standard_or_marketplace="Standard "
-local summary_str_change_to_marketplace="Marketplace "
+local summary_str_standard="Standard "
+local summary_str_marketplace="Marketplace "
+local summary_str_standard_or_marketplace=${summary_str_standard}
 local str_marketplace_compartments="${tab}(Marketplace images are not currently restricted by Compartment)"
 local str_marketplace_regions="${tab}(Marketplace images are not currently restricted by Region)"
 
 if [ "${is_using_param_marketplace}" = true ]; then
-	summary_str_standard_or_marketplace=${summary_str_change_to_marketplace}
+	summary_str_standard_or_marketplace=${summary_str_marketplace}
 else
 	str_marketplace_compartments=""
 	str_marketplace_regions=""
@@ -281,7 +282,7 @@ for compartment_ocid in "${array_compartment_ocids[@]}"; do
 			# if asking for a list of available images
 			if [ "${is_using_param_list}" = true ]; then
 				str_message=$(cat <<- EOF
-				\nAvailable ${summary_str_marketplace} Images.\n
+				\nAvailable ${summary_str_marketplace}Images.\n
 				EOF
 				)
 				str_images=$(oci compute pic listing list --all | jq '.data[]."display-name"' | sed "s|\"||g")
