@@ -86,7 +86,7 @@ get_marketplace_image_ocid()
 {
 local array_app_catalog_listing_ids=()
 local array_version_ids=()
-local array_image_ids=()
+local array_image_ocids=()
 
 export name_image_catalog_listing=$1
 
