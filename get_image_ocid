@@ -26,13 +26,14 @@ color_light_gray="\033[0;37m"
 array_compartment_ocids=()
 array_names=()
 array_regions=()
+array_oci_regions=()
 }
 
 check_dependencies()
 {
 # check whether dependencies are installed, error message and exit if not installed
 
-jq --help &> /dev/null
+jq --help &> /dev/null;
 if [ $? -ne 0 ]; then
 	str_message=$(cat <<- EOF
 	${color_red}Error:${color_none} Dependency missing: please install jq. You can verify your install with ${color_helpful}jq --help${color_none}.\n
@@ -43,7 +44,7 @@ if [ $? -ne 0 ]; then
 	exit
 fi
 
-oci &> /dev/null
+oci &> /dev/null;
 if [ $? -ne 0 ]; then
 	str_message=$(cat <<- EOF
 	\n${color_red}Error:${color_none} Dependency missing: please install oci-cli. You can verify your install with ${color_helpful}oci${color_none}.\n
@@ -139,7 +140,7 @@ while test $# -gt 0; do
 				show_options
 			fi
 			while test $# -gt 1; do
-				oci iam compartment get --compartment-id $2 &> /dev/null # silence output (redirect stdout and stderr to null
+				oci iam compartment get --compartment-id $2 &> /dev/null; # silence output (redirect stdout and stderr to null
 				# if command successful i.e. if compartment exists and is accessible
 				if [ $? -eq 0 ]; then
 					# success
@@ -158,6 +159,7 @@ while test $# -gt 0; do
 							exit
 					esac
 				fi
+				shift
 			done
 			shift
 			;;
